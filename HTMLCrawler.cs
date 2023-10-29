@@ -3,52 +3,18 @@ using HtmlAgilityPack;
 using System;
 using System.Linq;
 using System.Collections.Generic;
+using System.Xml.Serialization;
 
 namespace CrawlerHTML
 {
-    public class HtmlCrawler
+    public class HTMLCrawler
     {
         private HtmlDocument document;
 
-        public HtmlCrawler()
+        public HTMLCrawler()
         {
             document = new HtmlDocument();
         }
-
-        //public TreeNode BuildTreeFromHtml(string html)
-        //{
-        //    document.LoadHtml(html);
-
-        //    var rootNode = new TreeNode(document.DocumentNode);
-        //    CustomStack<TreeNode> stack = new();
-        //    stack.Push(rootNode);
-
-        //    foreach (var node in document.DocumentNode.DescendantsAndSelf())
-        //    {
-        //        if (node.Name != rootNode.Element.Name)
-        //        {
-        //            var parent = stack.Peek();
-        //            var newNode = new TreeNode(node);
-        //            parent.Children.Add(newNode);
-
-        //            if (node.Name.CustomStartsWith("/"))
-        //            {
-        //                stack.Pop();
-        //            }
-        //            else if (node.NodeType == HtmlNodeType.Element)
-        //            {
-        //                stack.Push(newNode);
-        //            }
-        //        }
-        //    }
-
-        //    if (stack.Count > 1)
-        //    {
-        //        Console.WriteLine("Error: Unmatched opening tag(s).");
-        //    }
-
-        //    return rootNode;
-        //}
 
         public TreeNode BuildTreeFromHtml(string html)
         {
@@ -89,7 +55,7 @@ namespace CrawlerHTML
             return rootNode;
         }
 
-        public CustomList<string> SearchElementsByRelativePath(string relativePath)
+        public CustomList<string> SearchElementsByRelativePath(string relativePath, TreeNode rootNode)
         {
             CustomList<string> pathSegments = new(relativePath.CustomTrim()
                 .CustomSplit("/")
@@ -101,54 +67,61 @@ namespace CrawlerHTML
                 return new CustomList<string>();
             }
 
-            CustomList<TreeNode> currentNode = new(new[] { BuildTreeFromHtml(document.Text) });
+            CustomList<TreeNode> currentNode = new(new[] { rootNode });
 
             foreach (var segment in pathSegments)
             {
                 CustomList<TreeNode> newNodes = new();
 
-                foreach (var node in currentNode)
-                {
-                    if (segment.CustomStartsWith("//"))
-                    {
-                        newNodes.AddRange(node.Element.DescendantsAndSelf(segment.TrimStart('/')).CustomSelect(n => new TreeNode(n)).ToArray());
-                    }
-                    else if (segment.CustomContains("[") && segment.CustomEndsWith("]"))
-                    {
-                        var tag = segment.CustomSplit("[")[0];
-                        var index = int.Parse(segment.Split(new char[] { '[', ']' })[1]) - 1;
-                        CustomList<TreeNode> matchingNodes = new(node.Children.CustomWhere(n => n.Element.Name == tag).ToArray());
+                string currentSegment = segment;
 
-                        if (index >= 0 && index < matchingNodes.Count)
+                if (currentSegment.CustomStartsWith("//"))
+                {
+                    currentSegment = currentSegment.Substring(2);
+                    newNodes.AddRange(currentNode[0].Element.DescendantsAndSelf(currentSegment)
+                        .Where(n => n.NodeType == HtmlNodeType.Element || (n.NodeType == HtmlNodeType.Text && !string.IsNullOrWhiteSpace(n.InnerText)))
+                        .Select(n => new TreeNode(n)).ToArray());
+                }
+                else
+                {
+                    foreach (var node in currentNode)
+                    {
+                        if (currentSegment.CustomContains("[") && currentSegment.CustomEndsWith("]"))
                         {
-                            newNodes.Add(matchingNodes[index]);
+                            var tag = currentSegment.CustomSplit("[")[0];
+                            var index = int.Parse(currentSegment.Split(new char[] { '[', ']' })[1]) - 1;
+                            CustomList<TreeNode> matchingNodes = new(node.Children
+                                .Where(n => n.Element.Name == tag)
+                                .ToArray());
+
+                            if (index >= 0 && index < matchingNodes.Count)
+                            {
+                                newNodes.Add(matchingNodes[index]);
+                            }
                         }
-                    }
-                    else if (segment == "*")
-                    {
-                        newNodes.AddRange(node.Children.ToArray());
-                    }
-                    else if (segment.CustomContains("[@"))
-                    {
-                        var tag = segment.CustomSplit("[@")[0];
-                        var attributePart = segment.CustomSplit("[@")[1].CustomTrimEnd(']');
-                        var attributeName = attributePart.CustomSplit("=")[0];
-                        var attributeValue = attributePart.CustomSplit("=")[1].CustomTrim('\'');
-                        newNodes.AddRange(node.Element.DescendantsAndSelf(tag).CustomWhere(n => n.Attributes
-                        .Contains(attributeName) && n.Attributes[attributeName].Value == attributeValue)
-                            .CustomSelect(n => new TreeNode(n)).ToArray());
+                        else
+                        {
+                            newNodes.AddRange(node.Element.Descendants(currentSegment)
+                                .Where(n => n.NodeType == HtmlNodeType.Element || (n.NodeType == HtmlNodeType.Text && !string.IsNullOrWhiteSpace(n.InnerText)))
+                                .Select(n => new TreeNode(n)).ToArray());
+                        }
                     }
                 }
 
                 currentNode = newNodes;
             }
 
-            CustomList<string> results = new();
-            results.AddRange(currentNode.CustomSelect(node => node.Element.InnerText).ToArray());
+            Console.WriteLine($"Debug - Current path segments: {string.Join(", ", pathSegments)}");
+            Console.WriteLine($"Debug - Current node count: {currentNode.Count}");
+
+            CustomList<string> results = new CustomList<string>();
+            results.AddRange(currentNode
+                .Select(node => node.Element.InnerText).Where(text => !string.IsNullOrWhiteSpace(text)).ToArray());
+
             return results;
         }
 
-        public void SetContentByRelativePath(string relativePath, string newValue)
+        public void SetContentByRelativePath(string relativePath, string newValue, TreeNode rootNode)
         {
             CustomList<string> pathSegments = new(relativePath.CustomTrim()
                 .CustomSplit("/")
@@ -160,7 +133,7 @@ namespace CrawlerHTML
                 return;
             }
 
-            CustomList<TreeNode> currentNode = new(new[] { BuildTreeFromHtml(document.Text) });
+            CustomList<TreeNode> currentNode = new(new[] { rootNode });
 
             foreach (var segment in pathSegments)
             {
@@ -202,20 +175,20 @@ namespace CrawlerHTML
             }
         }
 
-        public void ReplaceNodesByRelativePath(string relativePath, string newValue)
+        public void ReplaceNodesByRelativePath(string relativePath, string newValue, TreeNode rootNode)
         {
-            var nodesToReplace = SearchElementsByRelativePath(relativePath);
+            var nodesToReplace = SearchElementsByRelativePath(relativePath, rootNode);
 
             for (int i = 0; i < nodesToReplace.Count; i++)
             {
-                SetContentByRelativePath(relativePath, newValue);
+                SetContentByRelativePath(relativePath, newValue, rootNode);
             }
         }
 
-        public void CopyNodeByRelativePath(string sourcePath, string targetPath)
+        public void CopyNodeByRelativePath(string sourcePath, string targetPath, TreeNode rootNode)
         {
-            CustomList<string> sourceNodesText = SearchElementsByRelativePath(sourcePath);
-            CustomList<string> targetNodesText = SearchElementsByRelativePath(targetPath);
+            CustomList<string> sourceNodesText = SearchElementsByRelativePath(sourcePath, rootNode);
+            CustomList<string> targetNodesText = SearchElementsByRelativePath(targetPath, rootNode);
 
             if (sourceNodesText.Count == 0)
             {
