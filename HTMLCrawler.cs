@@ -75,7 +75,12 @@ namespace CrawlerHTML
 
                 string currentSegment = segment;
 
-                if (currentSegment.CustomStartsWith("//"))
+                if (currentSegment == "//")
+                {
+                    // Handle double slashes as a root selector
+                    newNodes.Add(rootNode);
+                }
+                else if (currentSegment.CustomStartsWith("//"))
                 {
                     currentSegment = currentSegment.Substring(2);
                     newNodes.AddRange(currentNode[0].Element.DescendantsAndSelf(currentSegment)
@@ -99,11 +104,29 @@ namespace CrawlerHTML
                                 newNodes.Add(matchingNodes[index]);
                             }
                         }
-                        else
+                        else if (currentSegment == "*")
                         {
-                            newNodes.AddRange(node.Element.Descendants(currentSegment)
+                            // Handle "*" as a wildcard to select all elements within the current tag
+                            newNodes.AddRange(node.Element.ChildNodes
                                 .Where(n => n.NodeType == HtmlNodeType.Element || (n.NodeType == HtmlNodeType.Text && !string.IsNullOrWhiteSpace(n.InnerText)))
                                 .Select(n => new TreeNode(n)).ToArray());
+                        }
+                        else
+                        {
+                            // Modify the logic to stop searching when the specified tag is encountered
+                            bool found = false;
+                            foreach (var n in node.Element.Elements(currentSegment))
+                            {
+                                if (n.Name == currentSegment)
+                                {
+                                    found = true;
+                                    newNodes.Add(new TreeNode(n));
+                                }
+                                else if (found)
+                                {
+                                    break;
+                                }
+                            }
                         }
                     }
                 }
@@ -116,7 +139,7 @@ namespace CrawlerHTML
 
             CustomList<string> results = new CustomList<string>();
             results.AddRange(currentNode
-                .Select(node => node.Element.InnerText).Where(text => !string.IsNullOrWhiteSpace(text)).ToArray());
+                .Select(node => node.Element.InnerText).Where(text => !string.IsNullOrWhiteSpace(text)).Distinct().ToArray());
 
             return results;
         }
